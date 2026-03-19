@@ -38,12 +38,16 @@ This fork adds a runnable POC script:
 2. Scrapes top results with `formats: ["markdown"]` and `onlyMainContent: true`.
 3. Produces a durable brief in `reports/firecrawl-demo/{timestamp}.md`.
 4. Produces machine-readable output in `reports/firecrawl-demo/{timestamp}.json`.
+5. Produces a stakeholder-friendly HTML brief in `reports/firecrawl-demo/{timestamp}.html`.
 
 ### Run the POC
 
 ```bash
 export FIRECRAWL_API_KEY=...
 bun run firecrawl:demo "persistent browser daemon architecture" --limit=3
+
+# optional: open the generated HTML brief in a browser for non-technical review
+open reports/firecrawl-demo/*.html
 ```
 
 ## Why this demo is realistic

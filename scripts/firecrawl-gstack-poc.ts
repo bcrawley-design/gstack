@@ -36,6 +36,101 @@ type DemoSource = {
 
 type DemoMode = 'live' | 'fixture';
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function renderHtmlBrief(input: {
+  query: string;
+  mode: DemoMode;
+  generatedAt: string;
+  sources: DemoSource[];
+  successfulSources: number;
+  jsonPath: string;
+}): string {
+  const sourceCards = input.sources
+    .map((source, index) => {
+      const status = source.error ? `⚠️ ${escapeHtml(source.error)}` : '✅ Success';
+      const snippet = source.snippet?.trim()
+        ? `<p class="snippet">${escapeHtml(source.snippet)}</p>`
+        : '<p class="snippet muted">No extractable snippet returned.</p>';
+
+      return `
+      <article class="card">
+        <div class="card-header">
+          <h3>${index + 1}. ${escapeHtml(source.title)}</h3>
+          <span class="status">${status}</span>
+        </div>
+        <p><strong>URL:</strong> <a href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(source.url)}</a></p>
+        <p><strong>Extracted markdown:</strong> ${source.markdownLength.toLocaleString()} chars</p>
+        ${snippet}
+      </article>`;
+    })
+    .join('\n');
+
+  const queryEncoded = escapeHtml(input.query);
+  const modeLabel = input.mode === 'live' ? 'Live Firecrawl API' : 'Fixture mode (no API key)';
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Firecrawl Research Brief</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f6f7fb; color: #10121a; }
+    main { max-width: 980px; margin: 0 auto; padding: 28px 20px 56px; }
+    .hero { background: white; border-radius: 14px; padding: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); margin-bottom: 18px; }
+    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-top: 12px; }
+    .meta div { background: #f1f4ff; padding: 10px 12px; border-radius: 10px; }
+    .value { margin-top: 14px; border-left: 4px solid #5b7cff; background: #f5f8ff; padding: 12px; border-radius: 8px; }
+    .grid { display: grid; gap: 12px; }
+    .card { background: white; border-radius: 12px; padding: 16px; box-shadow: 0 2px 10px rgba(0,0,0,0.07); }
+    .card-header { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+    h1,h2,h3 { margin: 0 0 8px; }
+    p { margin: 6px 0; line-height: 1.45; }
+    .status { font-size: 0.9rem; color: #465; }
+    .snippet { margin-top: 10px; padding: 10px; background: #f8f9ff; border-radius: 8px; }
+    .muted { opacity: 0.7; }
+    .footer { margin-top: 18px; font-size: 0.95rem; opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <main>
+    <section class="hero">
+      <h1>Firecrawl Research Brief (gstack POC)</h1>
+      <p><strong>Question:</strong> ${queryEncoded}</p>
+      <div class="meta">
+        <div><strong>Generated</strong><br/>${escapeHtml(input.generatedAt)}</div>
+        <div><strong>Mode</strong><br/>${modeLabel}</div>
+        <div><strong>Sources analyzed</strong><br/>${input.sources.length}</div>
+        <div><strong>Sources with extractable content</strong><br/>${input.successfulSources}</div>
+      </div>
+      <p class="value"><strong>Why this matters:</strong> This run converts one plain-language question into a reusable evidence package (human brief + structured JSON) that a stakeholder can review and act on without writing custom scraping logic.</p>
+    </section>
+
+    <section>
+      <h2>Top Sources</h2>
+      <div class="grid">
+        ${sourceCards}
+      </div>
+    </section>
+
+    <section class="footer">
+      <p><strong>Structured artifact path:</strong> <code>${escapeHtml(input.jsonPath)}</code></p>
+      <p>This demo complements gstack /browse workflows: Firecrawl handles multi-page extraction, then operators use this brief for planning and decision-making.</p>
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
 const OFFLINE_FIXTURE_SOURCES: DemoSource[] = [
   {
     title: 'Firecrawl documentation',
@@ -164,6 +259,7 @@ async function main() {
 
   const jsonPath = join(outDir, `${ts}.json`);
   const mdPath = join(outDir, `${ts}.md`);
+  const htmlPath = join(outDir, `${ts}.html`);
 
   const payload = {
     generatedAt: new Date().toISOString(),
@@ -211,9 +307,21 @@ async function main() {
 
   writeFileSync(mdPath, markdown);
 
+  const html = renderHtmlBrief({
+    query,
+    mode,
+    generatedAt: payload.generatedAt,
+    sources: scraped,
+    successfulSources: successfulSources.length,
+    jsonPath,
+  });
+
+  writeFileSync(htmlPath, html);
+
   console.log(`Firecrawl POC complete.`);
   console.log(`- Markdown brief: ${mdPath}`);
   console.log(`- JSON artifact: ${jsonPath}`);
+  console.log(`- HTML stakeholder brief: ${htmlPath}`);
 }
 
 main().catch((error) => {
