@@ -26,6 +26,40 @@ type FirecrawlScrapeResponse = {
   error?: string;
 };
 
+type DemoSource = {
+  url: string;
+  title: string;
+  snippet: string;
+  markdownLength: number;
+  error?: string;
+};
+
+type DemoMode = 'live' | 'fixture';
+
+const OFFLINE_FIXTURE_SOURCES: DemoSource[] = [
+  {
+    title: 'Firecrawl documentation',
+    url: 'https://docs.firecrawl.dev',
+    markdownLength: 1245,
+    snippet:
+      'Firecrawl turns websites into LLM-ready markdown and structured data. It supports crawl, scrape, and search endpoints for repeatable web extraction pipelines.',
+  },
+  {
+    title: 'Firecrawl API reference',
+    url: 'https://docs.firecrawl.dev/api-reference/introduction',
+    markdownLength: 993,
+    snippet:
+      'The API reference documents search, scrape, and crawl semantics, including options for only-main-content extraction and output formats such as markdown.',
+  },
+  {
+    title: 'Firecrawl crawl endpoint',
+    url: 'https://docs.firecrawl.dev/api-reference/endpoint/crawl',
+    markdownLength: 1108,
+    snippet:
+      'The crawl endpoint supports deep discovery with extraction settings per page, enabling teams to build durable ingestion flows with traceable output files.',
+  },
+];
+
 function parseArgs(argv: string[]): { query: string; limit: number } {
   const positional = argv.filter((arg) => !arg.startsWith('--'));
   const query = positional.join(' ').trim();
@@ -68,56 +102,54 @@ async function firecrawlRequest<T>(
 
 async function main() {
   const apiKey = process.env.FIRECRAWL_API_KEY;
-  if (!apiKey) {
-    throw new Error('Missing FIRECRAWL_API_KEY. Add it to your environment before running this demo.');
-  }
-
   const { query, limit } = parseArgs(process.argv.slice(2));
 
-  const search = await firecrawlRequest<FirecrawlSearchResponse>('search', apiKey, {
-    query,
-    limit,
-  });
+  let mode: DemoMode = 'live';
+  let scraped: DemoSource[] = [];
 
-  if (!search.success || !search.data || search.data.length === 0) {
-    throw new Error(`Firecrawl search returned no results for query: "${query}"`);
-  }
+  if (!apiKey) {
+    mode = 'fixture';
+    scraped = OFFLINE_FIXTURE_SOURCES.slice(0, limit);
+    console.warn('FIRECRAWL_API_KEY not found. Running in fixture mode for reproducible QA.');
+  } else {
+    const search = await firecrawlRequest<FirecrawlSearchResponse>('search', apiKey, {
+      query,
+      limit,
+    });
 
-  const selected = search.data.slice(0, limit);
-  const scraped = [] as Array<{
-    url: string;
-    title: string;
-    snippet: string;
-    markdownLength: number;
-    error?: string;
-  }>;
+    if (!search.success || !search.data || search.data.length === 0) {
+      throw new Error(`Firecrawl search returned no results for query: "${query}"`);
+    }
 
-  for (const item of selected) {
-    try {
-      const scrape = await firecrawlRequest<FirecrawlScrapeResponse>('scrape', apiKey, {
-        url: item.url,
-        formats: ['markdown'],
-        onlyMainContent: true,
-      });
+    const selected = search.data.slice(0, limit);
 
-      const markdown = (scrape.data?.markdown ?? '').trim();
-      const title =
-        scrape.data?.metadata?.title ?? item.title ?? scrape.data?.metadata?.sourceURL ?? item.url;
+    for (const item of selected) {
+      try {
+        const scrape = await firecrawlRequest<FirecrawlScrapeResponse>('scrape', apiKey, {
+          url: item.url,
+          formats: ['markdown'],
+          onlyMainContent: true,
+        });
 
-      scraped.push({
-        url: item.url,
-        title,
-        snippet: markdown.slice(0, 280).replace(/\s+/g, ' '),
-        markdownLength: markdown.length,
-      });
-    } catch (error) {
-      scraped.push({
-        url: item.url,
-        title: item.title ?? item.url,
-        snippet: '',
-        markdownLength: 0,
-        error: error instanceof Error ? error.message : String(error),
-      });
+        const markdown = (scrape.data?.markdown ?? '').trim();
+        const title =
+          scrape.data?.metadata?.title ?? item.title ?? scrape.data?.metadata?.sourceURL ?? item.url;
+
+        scraped.push({
+          url: item.url,
+          title,
+          snippet: markdown.slice(0, 280).replace(/\s+/g, ' '),
+          markdownLength: markdown.length,
+        });
+      } catch (error) {
+        scraped.push({
+          url: item.url,
+          title: item.title ?? item.url,
+          snippet: '',
+          markdownLength: 0,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 
@@ -135,6 +167,7 @@ async function main() {
 
   const payload = {
     generatedAt: new Date().toISOString(),
+    mode,
     query,
     limit,
     sources: scraped,
@@ -147,6 +180,7 @@ async function main() {
     '# Firecrawl Research Brief (gstack POC)',
     '',
     `- Generated: ${payload.generatedAt}`,
+    `- Mode: ${mode}`,
     `- Query: ${query}`,
     `- Sources analyzed: ${scraped.length}`,
     `- Sources successfully scraped: ${successfulSources.length}`,
@@ -166,6 +200,11 @@ async function main() {
     '- Gives `/office-hours` and planning skills structured, fresh market/technical context before implementation starts.',
     '- Produces auditable evidence artifacts (`reports/firecrawl-demo/*.md|json`) that can be attached to ticket workflows.',
     '- Complements the existing `/browse` tool: Firecrawl excels at multi-page extraction while `/browse` excels at deterministic interaction.',
+    ...(mode === 'fixture'
+      ? [
+          '- QA note: this run used fixture mode because FIRECRAWL_API_KEY was unavailable; use a key for live API validation.',
+        ]
+      : []),
     '',
     `JSON artifact: ${jsonPath}`,
   ].join('\n');
