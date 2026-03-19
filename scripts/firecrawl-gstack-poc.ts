@@ -89,25 +89,41 @@ async function main() {
     title: string;
     snippet: string;
     markdownLength: number;
+    error?: string;
   }>;
 
   for (const item of selected) {
-    const scrape = await firecrawlRequest<FirecrawlScrapeResponse>('scrape', apiKey, {
-      url: item.url,
-      formats: ['markdown'],
-      onlyMainContent: true,
-    });
+    try {
+      const scrape = await firecrawlRequest<FirecrawlScrapeResponse>('scrape', apiKey, {
+        url: item.url,
+        formats: ['markdown'],
+        onlyMainContent: true,
+      });
 
-    const markdown = (scrape.data?.markdown ?? '').trim();
-    const title =
-      scrape.data?.metadata?.title ?? item.title ?? scrape.data?.metadata?.sourceURL ?? item.url;
+      const markdown = (scrape.data?.markdown ?? '').trim();
+      const title =
+        scrape.data?.metadata?.title ?? item.title ?? scrape.data?.metadata?.sourceURL ?? item.url;
 
-    scraped.push({
-      url: item.url,
-      title,
-      snippet: markdown.slice(0, 280).replace(/\s+/g, ' '),
-      markdownLength: markdown.length,
-    });
+      scraped.push({
+        url: item.url,
+        title,
+        snippet: markdown.slice(0, 280).replace(/\s+/g, ' '),
+        markdownLength: markdown.length,
+      });
+    } catch (error) {
+      scraped.push({
+        url: item.url,
+        title: item.title ?? item.url,
+        snippet: '',
+        markdownLength: 0,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const successfulSources = scraped.filter((source) => !source.error && source.markdownLength > 0);
+  if (successfulSources.length === 0) {
+    throw new Error('All scrape attempts failed; no extractable source content was returned.');
   }
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-');
@@ -122,6 +138,7 @@ async function main() {
     query,
     limit,
     sources: scraped,
+    successfulSources: successfulSources.length,
   };
 
   writeFileSync(jsonPath, JSON.stringify(payload, null, 2));
@@ -132,6 +149,7 @@ async function main() {
     `- Generated: ${payload.generatedAt}`,
     `- Query: ${query}`,
     `- Sources analyzed: ${scraped.length}`,
+    `- Sources successfully scraped: ${successfulSources.length}`,
     '',
     '## Top sources',
     ...scraped.flatMap((source, index) => [
@@ -139,7 +157,9 @@ async function main() {
       `### ${index + 1}. ${source.title}`,
       `- URL: ${source.url}`,
       `- Extracted markdown length: ${source.markdownLength} chars`,
-      `- Snippet: ${source.snippet || '_No extractable content returned_'}...`,
+      ...(source.error
+        ? [`- Scrape status: ⚠️ ${source.error}`]
+        : [`- Scrape status: ✅ success`, `- Snippet: ${source.snippet || '_No extractable content returned_'}...`]),
     ]),
     '',
     '## Why this maps well to gstack',
